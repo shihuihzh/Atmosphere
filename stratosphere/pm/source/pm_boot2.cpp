@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2018 Atmosphère-NX
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
 #include <cstdlib>
 #include <cstdint>
 #include <cstdio>
@@ -9,6 +25,9 @@
 #include <stratosphere.hpp>
 #include "pm_boot2.hpp"
 #include "pm_registration.hpp"
+#include "pm_boot_mode.hpp"
+
+static std::vector<Boot2KnownTitleId> g_launched_titles;
 
 static bool IsHexadecimal(const char *str) {
     while (*str) {
@@ -21,22 +40,39 @@ static bool IsHexadecimal(const char *str) {
     return true;
 }
 
+static bool HasLaunchedTitle(Boot2KnownTitleId title_id) {
+    return std::find(g_launched_titles.begin(), g_launched_titles.end(), title_id) != g_launched_titles.end();
+}
+
+static void SetLaunchedTitle(Boot2KnownTitleId title_id) {
+    g_launched_titles.push_back(title_id);
+}
+
+static void ClearLaunchedTitles() {
+    g_launched_titles.clear();
+}
+
 static void LaunchTitle(Boot2KnownTitleId title_id, FsStorageId storage_id, u32 launch_flags, u64 *pid) {
-    u64 local_pid;
+    u64 local_pid = 0;
+    
+    /* Don't launch a title twice during boot2. */
+    if (HasLaunchedTitle(title_id)) {
+        return;
+    }
     
     Result rc = Registration::LaunchProcessByTidSid(Registration::TidSid{(u64)title_id, storage_id}, launch_flags, &local_pid);
     switch (rc) {
         case 0xCE01:
             /* Out of resource! */
-            /* TODO: Panic(). */
+            std::abort();
             break;
         case 0xDE01:
             /* Out of memory! */
-            /* TODO: Panic(). */
+            std::abort();
             break;
         case 0xD001:
             /* Limit Reached! */
-            /* TODO: Panic(). */
+            std::abort();
             break;
         default:
             /* We don't care about other issues. */
@@ -45,10 +81,47 @@ static void LaunchTitle(Boot2KnownTitleId title_id, FsStorageId storage_id, u32 
     if (pid) {
         *pid = local_pid;
     }
+    
+    if (R_SUCCEEDED(rc)) {
+        SetLaunchedTitle(title_id);
+    }
 }
 
-static bool ShouldForceMaintenanceMode() {
-    /* TODO: Contact set:sys, retrieve boot!force_maintenance, read plus/minus buttons. */
+static bool GetGpioPadLow(GpioPadName pad) {
+    GpioPadSession button;
+    if (R_FAILED(gpioOpenSession(&button, pad))) {
+        return false;
+    }
+    
+    /* Ensure we close even on early return. */
+    ON_SCOPE_EXIT { gpioPadClose(&button); };
+    
+    /* Set direction input. */
+    gpioPadSetDirection(&button, GpioDirection_Input);
+    
+    GpioValue val;
+    return R_SUCCEEDED(gpioPadGetValue(&button, &val)) && val == GpioValue_Low;
+}
+
+static bool IsMaintenanceMode() {
+    /* Contact set:sys, retrieve boot!force_maintenance. */
+    if (R_SUCCEEDED(setsysInitialize())) {
+        ON_SCOPE_EXIT { setsysExit(); };
+        
+        u8 force_maintenance = 1;
+        setsysGetSettingsItemValue("boot", "force_maintenance", &force_maintenance, sizeof(force_maintenance));
+        if (force_maintenance != 0) {
+            return true;
+        }
+    }
+
+    /* Contact GPIO, read plus/minus buttons. */
+    if (R_SUCCEEDED(gpioInitialize())) {
+        ON_SCOPE_EXIT { gpioExit(); };
+        
+        return GetGpioPadLow(GpioPadName_ButtonVolUp) && GetGpioPadLow(GpioPadName_ButtonVolDown);
+    }
+    
     return false;
 }
 
@@ -91,6 +164,7 @@ static const std::tuple<Boot2KnownTitleId, bool> g_additional_launch_programs[] 
     {Boot2KnownTitleId::sdb, true},         /* sdb */
     {Boot2KnownTitleId::migration, true},   /* migration */
     {Boot2KnownTitleId::grc, true},         /* grc */
+    {Boot2KnownTitleId::olsc, true},        /* olsc */
 };
 
 static void MountSdCard() {
@@ -106,7 +180,29 @@ static void MountSdCard() {
     fsdevMountSdmc();
 }
 
-void EmbeddedBoot2::Main() {     
+static void WaitForMitm(const char *service) {
+    bool mitm_installed = false;
+
+    Result rc = smManagerAmsInitialize();
+    if (R_FAILED(rc)) {
+        std::abort();
+    }
+    while (R_FAILED((rc = smManagerAmsHasMitm(&mitm_installed, service))) || !mitm_installed) {
+        if (R_FAILED(rc)) {
+            std::abort();
+        }
+        svcSleepThread(1000000ull);
+    }
+    smManagerAmsExit();
+}
+
+void EmbeddedBoot2::Main() {
+    /* Wait until fs.mitm has installed itself. We want this to happen as early as possible. */
+    WaitForMitm("fsp-srv");
+    
+    /* Clear titles. */
+    ClearLaunchedTitles();
+
     /* psc, bus, pcv is the minimal set of required titles to get SD card. */ 
     /* bus depends on pcie, and pcv depends on settings. */
     /* Launch psc. */
@@ -123,13 +219,30 @@ void EmbeddedBoot2::Main() {
     /* At this point, the SD card can be mounted. */
     MountSdCard();
     
+    /* Find out whether we are maintenance mode. */
+    bool maintenance = IsMaintenanceMode();
+    if (maintenance) {
+        BootModeService::SetMaintenanceBootForEmbeddedBoot2();
+    }
+        
+    /* Wait for other atmosphere mitm modules to initialize. */
+    WaitForMitm("set:sys");
+    if (GetRuntimeFirmwareVersion() >= FirmwareVersion_200) {
+        WaitForMitm("bpc");
+    } else {
+        WaitForMitm("bpc:c");
+    }
+    
     /* Launch usb. */
     LaunchTitle(Boot2KnownTitleId::usb, FsStorageId_NandSystem, 0, NULL);
+    
     /* Launch tma. */
     LaunchTitle(Boot2KnownTitleId::tma, FsStorageId_NandSystem, 0, NULL);
+      
+    /* Launch Atmosphere dmnt, using FsStorageId_None to force SD card boot. */
+    LaunchTitle(Boot2KnownTitleId::dmnt, FsStorageId_None, 0, NULL);
     
     /* Launch default programs. */
-    bool maintenance = ShouldForceMaintenanceMode();
     for (auto &launch_program : g_additional_launch_programs) {
         if (!maintenance || std::get<bool>(launch_program)) {
             LaunchTitle(std::get<Boot2KnownTitleId>(launch_program), FsStorageId_NandSystem, 0, NULL);
@@ -142,21 +255,41 @@ void EmbeddedBoot2::Main() {
     if (titles_dir != NULL) {
         while ((ent = readdir(titles_dir)) != NULL) {
             if (strlen(ent->d_name) == 0x10 && IsHexadecimal(ent->d_name)) {
-                u64 title_id = strtoul(ent->d_name, NULL, 16);
+                Boot2KnownTitleId title_id = (Boot2KnownTitleId)strtoul(ent->d_name, NULL, 16);
+                if (HasLaunchedTitle(title_id)) {
+                    continue;
+                }
                 char title_path[FS_MAX_PATH] = {0};
                 strcpy(title_path, "sdmc:/atmosphere/titles/");
                 strcat(title_path, ent->d_name);
-                strcat(title_path, "/boot2.flag");
+                strcat(title_path, "/flags/boot2.flag");
                 FILE *f_flag = fopen(title_path, "rb");
                 if (f_flag != NULL) {
                     fclose(f_flag);
-                    LaunchTitle((Boot2KnownTitleId)title_id, FsStorageId_None, 0, NULL);
+                    LaunchTitle(title_id, FsStorageId_None, 0, NULL);
+                } else {
+                    /* TODO: Deprecate this in the future. */
+                    memset(title_path, 0, FS_MAX_PATH);
+                    strcpy(title_path, "sdmc:/atmosphere/titles/");
+                    strcat(title_path, ent->d_name);
+                    strcat(title_path, "/boot2.flag");
+                    f_flag = fopen(title_path, "rb");
+                    if (f_flag != NULL) {
+                        fclose(f_flag);
+                        LaunchTitle(title_id, FsStorageId_None, 0, NULL);
+                    }
                 }
             }
         }
         closedir(titles_dir);
     }
     
+    /* Free the memory used to track what boot2 launches. */
+    ClearLaunchedTitles();
+        
     /* We no longer need the SD card. */
     fsdevUnmountAll();
+    
+    /* Clear titles. */
+    ClearLaunchedTitles();
 }

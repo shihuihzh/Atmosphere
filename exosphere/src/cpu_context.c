@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2018 Atmosphère-NX
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
 #include <stdbool.h>
 #include <stdint.h>
 #include "arm.h"
@@ -84,7 +100,7 @@ uint32_t cpu_on(uint32_t core, uintptr_t entrypoint_addr, uint64_t argument) {
     static const uint32_t status_masks[NUM_CPU_CORES] = {0x4000, 0x200, 0x400, 0x800};
     static const uint32_t toggle_vals[NUM_CPU_CORES] = {0xE, 0x9, 0xA, 0xB};
     
-    if (exosphere_get_target_firmware() >= EXOSPHERE_TARGET_FIRMWARE_400) {
+    if (exosphere_get_target_firmware() >= ATMOSPHERE_TARGET_FIRMWARE_400) {
         /* Reset the core */
         CLK_RST_CONTROLLER_RST_CPUG_CMPLX_SET_0 = (1 << (core + 0x10)) | (1 << core);
     }
@@ -117,7 +133,7 @@ uint32_t cpu_on(uint32_t core, uintptr_t entrypoint_addr, uint64_t argument) {
     }
 
 CPU_ON_SUCCESS:
-    if (exosphere_get_target_firmware() >= EXOSPHERE_TARGET_FIRMWARE_400) {
+    if (exosphere_get_target_firmware() >= ATMOSPHERE_TARGET_FIRMWARE_400) {
         /* Start the core */
         CLK_RST_CONTROLLER_RST_CPUG_CMPLX_CLR_0 = (1 << (core + 0x10)) | (1 << core);
     }

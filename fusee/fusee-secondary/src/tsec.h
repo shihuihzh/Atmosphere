@@ -1,3 +1,20 @@
+/*
+ * Copyright (c) 2018 naehrwert
+ * Copyright (c) 2018 Atmosphère-NX
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
 #ifndef FUSEE_TSEC_H_
 #define FUSEE_TSEC_H_
 
@@ -92,6 +109,10 @@ static inline volatile tegra_tsec_t *tsec_get_regs(void)
     return (volatile tegra_tsec_t *)TSEC_BASE;
 }
 
-int tsec_get_key(uint8_t *key, uint32_t rev, const void *tsec_fw);
+void tsec_enable_clkrst();
+void tsec_disable_clkrst();
+int tsec_get_key(uint8_t *key, uint32_t rev, const void *tsec_fw, size_t tsec_fw_size);
+int tsec_load_fw(const void *tsec_fw, size_t tsec_fw_size);
+void tsec_run_fw();
 
 #endif

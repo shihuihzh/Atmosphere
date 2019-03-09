@@ -1,9 +1,19 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <errno.h>
-#include <malloc.h>
-#include <sys/iosupport.h>
+/*
+ * Copyright (c) 2018 Atmosphère-NX
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
 #include "console.h"
 #include "di.h"
 #include "display/video_fb.h"
@@ -165,7 +175,6 @@ void *console_get_framebuffer(bool enable_display) {
     if (g_framebuffer != NULL && enable_display) {
         console_init_display();
     }
-
     return g_framebuffer;
 }
 
@@ -173,8 +182,6 @@ int console_display(const void *framebuffer) {
     if (!g_display_initialized) {
         console_init_display();
     }
-
-    /* TODO: does this work? */
     display_init_framebuffer((void *)framebuffer);
     return 0;
 }
@@ -183,7 +190,6 @@ int console_resume(void) {
     if (!g_display_initialized) {
         console_init_display();
     } else {
-        /* TODO: does this work? */
         display_init_framebuffer(g_framebuffer);
     }
     return 0;

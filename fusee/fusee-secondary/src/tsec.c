@@ -1,3 +1,20 @@
+/*
+ * Copyright (c) 2018 naehrwert
+ * Copyright (c) 2018 Atmosphère-NX
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
 #include "tsec.h"
 #include "di.h"
 #include "timers.h"
@@ -32,17 +49,34 @@ static int tsec_dma_phys_to_flcn(bool is_imem, uint32_t flcn_offset, uint32_t ph
     return tsec_dma_wait_idle();
 }
 
-int tsec_get_key(uint8_t *key, uint32_t rev, const void *tsec_fw)
+void tsec_enable_clkrst()
 {
-    volatile tegra_tsec_t *tsec = tsec_get_regs();
-
-    /* Enable clocks. */
+    /* Enable all devices used by TSEC. */
     clkrst_reboot(CARDEVICE_HOST1X);
     clkrst_reboot(CARDEVICE_TSEC);
     clkrst_reboot(CARDEVICE_SOR_SAFE);
     clkrst_reboot(CARDEVICE_SOR0);
     clkrst_reboot(CARDEVICE_SOR1);
     clkrst_reboot(CARDEVICE_KFUSE);
+}
+
+void tsec_disable_clkrst()
+{
+    /* Disable all devices used by TSEC. */
+    clkrst_disable(CARDEVICE_KFUSE);
+    clkrst_disable(CARDEVICE_SOR1);
+    clkrst_disable(CARDEVICE_SOR0);
+    clkrst_disable(CARDEVICE_SOR_SAFE);
+    clkrst_disable(CARDEVICE_TSEC);
+    clkrst_disable(CARDEVICE_HOST1X);
+}
+
+int tsec_get_key(uint8_t *key, uint32_t rev, const void *tsec_fw, size_t tsec_fw_size)
+{
+    volatile tegra_tsec_t *tsec = tsec_get_regs();
+
+    /* Enable clocks. */
+    tsec_enable_clkrst();
 
     /* Configure Falcon. */
     tsec->FALCON_DMACTL = 0;
@@ -53,29 +87,19 @@ int tsec_get_key(uint8_t *key, uint32_t rev, const void *tsec_fw)
     if (!tsec_dma_wait_idle())
     {
         /* Disable clocks. */
-        clkrst_disable(CARDEVICE_KFUSE);
-        clkrst_disable(CARDEVICE_SOR1);
-        clkrst_disable(CARDEVICE_SOR0);
-        clkrst_disable(CARDEVICE_SOR_SAFE);
-        clkrst_disable(CARDEVICE_TSEC);
-        clkrst_disable(CARDEVICE_HOST1X);
+        tsec_disable_clkrst();
     
         return -1;
     }
     
     /* Load firmware. */
     tsec->FALCON_DMATRFBASE = (uint32_t)tsec_fw >> 8;
-    for (uint32_t addr = 0; addr < 0xF00; addr += 0x100)
+    for (uint32_t addr = 0; addr < tsec_fw_size; addr += 0x100)
     {
         if (!tsec_dma_phys_to_flcn(true, addr, addr))
         {
             /* Disable clocks. */
-            clkrst_disable(CARDEVICE_KFUSE);
-            clkrst_disable(CARDEVICE_SOR1);
-            clkrst_disable(CARDEVICE_SOR0);
-            clkrst_disable(CARDEVICE_SOR_SAFE);
-            clkrst_disable(CARDEVICE_TSEC);
-            clkrst_disable(CARDEVICE_HOST1X);
+            tsec_disable_clkrst();
         
             return -2;
         }
@@ -93,12 +117,7 @@ int tsec_get_key(uint8_t *key, uint32_t rev, const void *tsec_fw)
     if (!tsec_dma_wait_idle())
     {
         /* Disable clocks. */
-        clkrst_disable(CARDEVICE_KFUSE);
-        clkrst_disable(CARDEVICE_SOR1);
-        clkrst_disable(CARDEVICE_SOR0);
-        clkrst_disable(CARDEVICE_SOR_SAFE);
-        clkrst_disable(CARDEVICE_TSEC);
-        clkrst_disable(CARDEVICE_HOST1X);
+        tsec_disable_clkrst();
     
         return -3;
     }
@@ -109,12 +128,7 @@ int tsec_get_key(uint8_t *key, uint32_t rev, const void *tsec_fw)
         if (get_time_ms() > timeout)
         {
             /* Disable clocks. */
-            clkrst_disable(CARDEVICE_KFUSE);
-            clkrst_disable(CARDEVICE_SOR1);
-            clkrst_disable(CARDEVICE_SOR0);
-            clkrst_disable(CARDEVICE_SOR_SAFE);
-            clkrst_disable(CARDEVICE_TSEC);
-            clkrst_disable(CARDEVICE_HOST1X);
+            tsec_disable_clkrst();
         
             return -4;
         }
@@ -123,12 +137,7 @@ int tsec_get_key(uint8_t *key, uint32_t rev, const void *tsec_fw)
     if (tsec->FALCON_SCRATCH1 != 0xB0B0B0B0)
     {
         /* Disable clocks. */
-        clkrst_disable(CARDEVICE_KFUSE);
-        clkrst_disable(CARDEVICE_SOR1);
-        clkrst_disable(CARDEVICE_SOR0);
-        clkrst_disable(CARDEVICE_SOR_SAFE);
-        clkrst_disable(CARDEVICE_TSEC);
-        clkrst_disable(CARDEVICE_HOST1X);
+        tsec_disable_clkrst();
     
         return -5;
     }
@@ -153,4 +162,55 @@ int tsec_get_key(uint8_t *key, uint32_t rev, const void *tsec_fw)
     memcpy(key, &tmp, 0x10);
 
     return 0;
+}
+
+int tsec_load_fw(const void *tsec_fw, size_t tsec_fw_size)
+{
+    volatile tegra_tsec_t *tsec = tsec_get_regs();
+
+    /* Enable clocks. */
+    tsec_enable_clkrst();
+
+    /* Configure Falcon. */
+    tsec->FALCON_DMACTL = 0;
+    tsec->FALCON_IRQMSET = 0xFFF2;
+    tsec->FALCON_IRQDEST = 0xFFF0;
+    tsec->FALCON_ITFEN = 3;
+    
+    if (!tsec_dma_wait_idle())
+    {
+        /* Disable clocks. */
+        tsec_disable_clkrst();
+    
+        return -1;
+    }
+    
+    /* Load firmware. */
+    tsec->FALCON_DMATRFBASE = (uint32_t)tsec_fw >> 8;
+    for (uint32_t addr = 0; addr < tsec_fw_size; addr += 0x100)
+    {
+        if (!tsec_dma_phys_to_flcn(true, addr, addr))
+        {
+            /* Disable clocks. */
+            tsec_disable_clkrst();
+        
+            return -2;
+        }
+    }
+
+    return 0;
+}
+
+void tsec_run_fw()
+{
+    volatile tegra_tsec_t *tsec = tsec_get_regs();
+    
+    /* Unknown host1x write. */
+    MAKE_HOST1X_REG(0x3300) = 0x34C2E1DA;
+    
+    /* Execute firmware. */
+    tsec->FALCON_SCRATCH1 = 0;
+    tsec->FALCON_SCRATCH0 = 1;
+    tsec->FALCON_BOOTVEC = 0;
+    tsec->FALCON_CPUCTL = 2;
 }

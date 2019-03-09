@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2018 Atmosphère-NX
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
 #include <string.h>
 #include "utils.h"
 #include "arm.h"
@@ -10,7 +26,7 @@
 
 #undef  MAILBOX_NX_BOOTLOADER_BASE
 #undef  TIMERS_BASE
-#define MAILBOX_NX_BOOTLOADER_BASE  (MMIO_GET_DEVICE_PA(MMIO_DEVID_NXBOOTLOADER_MAILBOX))
+#define MAILBOX_NX_BOOTLOADER_BASE(targetfw)  (target_firmware >= ATMOSPHERE_TARGET_FIRMWARE_700) ? (MMIO_GET_DEVICE_7X_PA(MMIO_DEVID_NXBOOTLOADER_MAILBOX)) : (MMIO_GET_DEVICE_PA(MMIO_DEVID_NXBOOTLOADER_MAILBOX))
 #define TIMERS_BASE                 (MMIO_GET_DEVICE_PA(MMIO_DEVID_TMRs_WDTs))
 
 extern const uint8_t __start_cold[];
@@ -32,13 +48,16 @@ static void identity_map_all_mappings(uintptr_t *mmu_l1_tbl, uintptr_t *mmu_l3_t
     }
 }
 
-static void mmio_map_all_devices(uintptr_t *mmu_l3_tbl) {
+static void mmio_map_all_devices(uintptr_t *mmu_l3_tbl, unsigned int target_firmware) {
     static const uintptr_t pas[]        =   { TUPLE_FOLD_LEFT_0(EVAL(MMIO_DEVID_MAX), _MMAPDEV, COMMA) };
     static const size_t sizes[]         =   { TUPLE_FOLD_LEFT_1(EVAL(MMIO_DEVID_MAX), _MMAPDEV, COMMA) };
     static const bool is_secure[]       =   { TUPLE_FOLD_LEFT_2(EVAL(MMIO_DEVID_MAX), _MMAPDEV, COMMA) };
+    
+    static const uintptr_t pas_7x[]     =   { TUPLE_FOLD_LEFT_0(EVAL(MMIO_DEVID_MAX), _MMAPDEV7X, COMMA) };
 
     for(size_t i = 0, offset = 0; i < MMIO_DEVID_MAX; i++) {
-        mmio_map_device(mmu_l3_tbl, MMIO_BASE + offset, pas[i], sizes[i], is_secure[i]);
+        uintptr_t pa = (target_firmware < ATMOSPHERE_TARGET_FIRMWARE_700) ? pas[i] : pas_7x[i];
+        mmio_map_device(mmu_l3_tbl, MMIO_BASE + offset, pa, sizes[i], is_secure[i]);
         offset += sizes[i];
         offset += 0x1000;
     }
@@ -75,7 +94,7 @@ static void tzram_map_all_segments(uintptr_t *mmu_l3_tbl, unsigned int target_fi
     static const uintptr_t offs_5x[]    =   { TUPLE_FOLD_LEFT_0(EVAL(TZRAM_SEGMENT_ID_MAX), _MMAPTZ5XS, COMMA) };
     
     for(size_t i = 0, offset = 0; i < TZRAM_SEGMENT_ID_MAX; i++) {
-        uintptr_t off = (target_firmware < EXOSPHERE_TARGET_FIRMWARE_500) ? offs[i] : offs_5x[i];
+        uintptr_t off = (target_firmware < ATMOSPHERE_TARGET_FIRMWARE_500) ? offs[i] : offs_5x[i];
         tzram_map_segment(mmu_l3_tbl, TZRAM_SEGMENT_BASE + offset, 0x7C010000ull + off, sizes[i], is_executable[i]);
         offset += increments[i];
     }
@@ -85,7 +104,7 @@ static void configure_ttbls(unsigned int target_firmware) {
     uintptr_t *mmu_l1_tbl;
     uintptr_t *mmu_l2_tbl; 
     uintptr_t *mmu_l3_tbl;
-    if (target_firmware < EXOSPHERE_TARGET_FIRMWARE_500) {
+    if (target_firmware < ATMOSPHERE_TARGET_FIRMWARE_500) {
         mmu_l1_tbl = (uintptr_t *)(TZRAM_GET_SEGMENT_PA(TZRAM_SEGEMENT_ID_SECMON_EVT) + 0x800 - 64);
         mmu_l2_tbl = (uintptr_t *)TZRAM_GET_SEGMENT_PA(TZRAM_SEGMENT_ID_L2_TRANSLATION_TABLE);
         mmu_l3_tbl = (uintptr_t *)TZRAM_GET_SEGMENT_PA(TZRAM_SEGMENT_ID_L3_TRANSLATION_TABLE);
@@ -111,7 +130,7 @@ static void configure_ttbls(unsigned int target_firmware) {
     mmu_map_table(2, mmu_l2_tbl, 0x1F0000000ull, mmu_l3_tbl, 0);
 
     identity_map_all_mappings(mmu_l1_tbl, mmu_l3_tbl);
-    mmio_map_all_devices(mmu_l3_tbl);
+    mmio_map_all_devices(mmu_l3_tbl, target_firmware);
     lp0_entry_map_all_ram_segments(mmu_l3_tbl);
     warmboot_map_all_ram_segments(mmu_l3_tbl);
     tzram_map_all_segments(mmu_l3_tbl, target_firmware);
@@ -135,7 +154,7 @@ uintptr_t get_coldboot_crt0_temp_stack_address(void) {
 }
 
 uintptr_t get_coldboot_crt0_stack_address(void) {
-    if (exosphere_get_target_firmware_for_init() < EXOSPHERE_TARGET_FIRMWARE_500) {
+    if (exosphere_get_target_firmware_for_init() < ATMOSPHERE_TARGET_FIRMWARE_500) {
         return TZRAM_GET_SEGMENT_PA(TZRAM_SEGMENT_ID_CORE3_STACK) + 0x800;
     } else {
         return TZRAM_GET_SEGMENT_5X_PA(TZRAM_SEGMENT_ID_CORE3_STACK) + 0x800;
@@ -177,7 +196,7 @@ void coldboot_init(coldboot_crt0_reloc_list_t *reloc_list, uintptr_t start_cold)
     init_dma_controllers(g_exosphere_target_firmware_for_init);
 
     configure_ttbls(g_exosphere_target_firmware_for_init);
-    if (g_exosphere_target_firmware_for_init < EXOSPHERE_TARGET_FIRMWARE_500) {
+    if (g_exosphere_target_firmware_for_init < ATMOSPHERE_TARGET_FIRMWARE_500) {
         set_memory_registers_enable_mmu_1x_ttbr0();
     } else {
         set_memory_registers_enable_mmu_5x_ttbr0();

@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2018 Atmosphère-NX
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
 #ifndef FUSEE_PMC_H
 #define FUSEE_PMC_H
 
@@ -44,6 +60,11 @@
 #define APBDEV_PMC_SCRATCH188_0 MAKE_PMC_REG(0x810)
 #define APBDEV_PMC_SCRATCH190_0 MAKE_PMC_REG(0x818)
 #define APBDEV_PMC_SCRATCH200_0 MAKE_PMC_REG(0x840)
+
+#define APBDEV_PMC_SCRATCH45_0 MAKE_PMC_REG(0x234)
+#define APBDEV_PMC_SCRATCH46_0 MAKE_PMC_REG(0x238)
+#define APBDEV_PMC_SCRATCH33_0 MAKE_PMC_REG(0x120)
+#define APBDEV_PMC_SCRATCH40_0 MAKE_PMC_REG(0x13C)
 
 typedef struct {
     uint32_t cntrl;

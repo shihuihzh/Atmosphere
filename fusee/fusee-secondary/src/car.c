@@ -1,4 +1,21 @@
+/*
+ * Copyright (c) 2018 Atmosphère-NX
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
 #include "car.h"
+#include "timers.h"
 #include "utils.h"
 
 static inline uint32_t get_clk_source_reg(CarDevice dev) {
@@ -105,7 +122,15 @@ void clkrst_disable(CarDevice dev) {
 
 void clkrst_reboot(CarDevice dev) {
     clkrst_disable(dev);
-    clkrst_enable(dev);
+    if (dev == CARDEVICE_KFUSE) {
+        /* Workaround for KFUSE clock. */
+        clk_enable(dev);
+        udelay(100);
+        rst_disable(dev);
+        udelay(200);
+    } else {
+        clkrst_enable(dev);
+    }
 }
 
 void clkrst_enable_fuse_regs(bool enable) {
